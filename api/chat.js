@@ -1,17 +1,13 @@
 module.exports = async function handler(req, res) {
   if (req.method !== "POST") {
-    return res.status(405).json({
-      error: "Método não permitido"
-    });
+    return res.status(405).json({ error: "Método não permitido" });
   }
 
   try {
     const { message } = req.body || {};
 
     if (!message) {
-      return res.status(400).json({
-        error: "Mensagem vazia"
-      });
+      return res.status(400).json({ error: "Mensagem vazia" });
     }
 
     const response = await fetch(
@@ -20,12 +16,18 @@ module.exports = async function handler(req, res) {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "x-goog-api-key": process.env.GEMINI_API_KEY,
-          "Api-Revision": "2026-05-20"
+          "x-goog-api-key": process.env.GEMINI_API_KEY
         },
         body: JSON.stringify({
           model: "gemini-3.6-flash",
-          input: message
+          input: message,
+          tools: [
+            {
+              type: "google_search"
+            }
+          ],
+          system_instruction:
+            "Você é JARVIS, assistente pessoal da Site Fácil TO. Responda em português do Brasil, naturalmente, de forma objetiva e útil. Use Google Search quando a pergunta exigir informação atual, como placares, notícias, preços, clima, horários e acontecimentos recentes. Não invente dados."
         })
       }
     );
@@ -41,26 +43,49 @@ module.exports = async function handler(req, res) {
       });
     }
 
-    let reply = "";
+    let reply = data?.output_text || "";
 
-    if (data?.output_text) {
-      reply = data.output_text;
-    } else if (Array.isArray(data?.steps)) {
+    if (!reply && Array.isArray(data?.steps)) {
+      reply = data.steps
+        .filter((step) => step.type === "model_output")
+        .flatMap((step) =>
+          Array.isArray(step.content) ? step.content : []
+        )
+        .filter((content) => content.type === "text")
+        .map((content) => content.text || "")
+        .join("")
+        .trim();
+    }
+
+    const sources = [];
+
+    if (Array.isArray(data?.steps)) {
       for (const step of data.steps) {
-        if (step.type === "model_output" && Array.isArray(step.content)) {
-          for (const item of step.content) {
-            if (item.type === "text") {
-              reply += item.text || "";
+        if (
+          step.type === "model_output" &&
+          Array.isArray(step.content)
+        ) {
+          for (const content of step.content) {
+            if (Array.isArray(content.annotations)) {
+              for (const annotation of content.annotations) {
+                if (
+                  annotation.type === "url_citation" &&
+                  (annotation.title || annotation.url)
+                ) {
+                  sources.push(
+                    annotation.title || annotation.url
+                  );
+                }
+              }
             }
           }
         }
       }
     }
 
-    reply = reply.trim();
-
     return res.status(200).json({
-      reply: reply || "Não consegui gerar uma resposta."
+      reply: reply || "Não consegui gerar uma resposta.",
+      sources: [...new Set(sources)].slice(0, 3)
     });
 
   } catch (error) {
