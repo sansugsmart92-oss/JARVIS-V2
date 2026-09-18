@@ -20,12 +20,11 @@ module.exports = async function handler(req, res) {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "x-goog-api-key": process.env.GEMINI_API_KEY
+          "x-goog-api-key": process.env.GEMINI_API_KEY,
+          "Api-Revision": "2026-05-20"
         },
         body: JSON.stringify({
           model: "gemini-3.6-flash",
-          system_instruction:
-            "Você é JARVIS, um assistente pessoal inteligente. Responda sempre em português do Brasil, de forma natural, útil e objetiva.",
           input: message
         })
       }
@@ -42,19 +41,26 @@ module.exports = async function handler(req, res) {
       });
     }
 
-    const reply =
-      data?.steps
-        ?.filter(step => step.type === "model_output")
-        ?.flatMap(step => step.content || [])
-        ?.filter(content => content.type === "text")
-        ?.map(content => content.text || "")
-        ?.join("")
-        ?.trim() ||
-      data?.output_text ||
-      "Não consegui gerar uma resposta.";
+    let reply = "";
+
+    if (data?.output_text) {
+      reply = data.output_text;
+    } else if (Array.isArray(data?.steps)) {
+      for (const step of data.steps) {
+        if (step.type === "model_output" && Array.isArray(step.content)) {
+          for (const item of step.content) {
+            if (item.type === "text") {
+              reply += item.text || "";
+            }
+          }
+        }
+      }
+    }
+
+    reply = reply.trim();
 
     return res.status(200).json({
-      reply
+      reply: reply || "Não consegui gerar uma resposta."
     });
 
   } catch (error) {
